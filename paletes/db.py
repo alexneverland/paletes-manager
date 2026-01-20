@@ -3,6 +3,8 @@ from tkinter import messagebox
 from .constants import DB_PATH
 import pandas as pd
 from .constants import DB_PATH, MAX_DAYS_HISTORY, CARRIERS
+import logging
+log = logging.getLogger("paletes.db")
 
 def get_connection():
     try:
@@ -128,9 +130,8 @@ def clean_old_data():
     conn.commit()
     conn.close()
 
-    print(
-        f"DEBUG: Cleaned old DB data before {cutoff_date}."
-    )
+    log.info("Cleaned old DB data before %s", cutoff_date)
+
 def fetch_distinct_names_by_carrier():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
