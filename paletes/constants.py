@@ -1,10 +1,32 @@
 import os
+import sys
 
-CARRIERS = ["ΔΙΑΚΙΝΗΣΗ", "ΜΑΓΛΟΥΣΙΔΗΣ", "ΚΑΣΣΟΥΔΑΚΗΣ", "ΔΙΑΦΟΡΑ"]
+# =========================
+# Base directory (DEV / EXE)
+# =========================
 
-SAVE_FOLDER = "data"
+def get_base_dir():
+    # Αν τρέχουμε σαν EXE (PyInstaller)
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    # Αν τρέχουμε σαν script
+    return os.path.dirname(os.path.abspath(__file__))
+
+BASE_DIR = get_base_dir()
+
+# =========================
+# Paths
+# =========================
+
+SAVE_FOLDER = os.path.join(BASE_DIR, "data")
 DB_FILENAME = "paletes.db"
 DB_PATH = os.path.join(SAVE_FOLDER, DB_FILENAME)
+
+# =========================
+# App constants
+# =========================
+
+CARRIERS = ["ΔΙΑΚΙΝΗΣΗ", "ΜΑΓΛΟΥΣΙΔΗΣ", "ΚΑΣΣΟΥΔΑΚΗΣ", "ΔΙΑΦΟΡΑ"]
 
 MAX_DAYS_HISTORY = 40
 MAX_FUTURE_DAYS = 4
