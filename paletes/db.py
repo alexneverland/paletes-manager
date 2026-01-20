@@ -4,6 +4,8 @@ from .constants import DB_PATH
 import pandas as pd
 from .constants import DB_PATH, MAX_DAYS_HISTORY, CARRIERS
 import logging
+import os
+
 log = logging.getLogger("paletes.db")
 
 def get_connection():
