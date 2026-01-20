@@ -127,6 +127,15 @@ class PaletesApp:
         self.current_mode = "main"
         self.mode_button = None; self.export_btn = None; self.canvas = None
         self.carriers_frame = None; self.canvas_window_id = None
+        footer = ttk.Label(
+            self.root,
+            text="© 2026 LAZAROS SOLUTIONS",
+            anchor="e",
+            font=("Segoe UI", 8),
+            foreground="#666666"
+        )
+
+        footer.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=2)
 
         init_database()
         auto_backup_db()
