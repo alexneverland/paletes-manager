@@ -1,6 +1,8 @@
 import sqlite3
 from tkinter import messagebox
 from .constants import DB_PATH
+import pandas as pd
+from .constants import DB_PATH, MAX_DAYS_HISTORY, CARRIERS
 
 def get_connection():
     try:
@@ -10,11 +12,10 @@ def get_connection():
         return None
 
 def init_database():
-    conn = get_connection()
-    if not conn:
-        return
+    conn = sqlite3.connect(DB_PATH)
     try:
         cur = conn.cursor()
+
         cur.execute("""
             CREATE TABLE IF NOT EXISTS entries (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,6 +29,7 @@ def init_database():
                 comments TEXT
             )
         """)
+
         cur.execute("""
             CREATE TABLE IF NOT EXISTS predictions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,8 +41,254 @@ def init_database():
                 comments TEXT
             )
         """)
+
         conn.commit()
-    except sqlite3.Error as e:
-        messagebox.showerror("Σφάλμα Βάσης", f"Αρχικοποίηση πινάκων: {e}")
+
     finally:
         conn.close()
+
+import sqlite3
+from datetime import datetime
+from .constants import DB_PATH
+
+# =========================
+# Entries
+# =========================
+
+def insert_entry(entry_date, carrier, code, name, invoice, left, boxes, comments):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO entries
+        (entry_date, carrier, code, name, invoice, left, boxes, comments)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (entry_date, carrier, code, name, invoice, left, boxes, comments))
+    conn.commit()
+    conn.close()
+
+
+def fetch_entries(entry_date):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, carrier, code, name, invoice, left, boxes, comments
+        FROM entries
+        WHERE entry_date = ?
+        ORDER BY id ASC
+    """, (entry_date,))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def delete_entry(entry_id):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
+    conn.commit()
+    conn.close()
+
+
+def update_entry_left(entry_id, left_value):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE entries SET left = ? WHERE id = ?",
+        (left_value, entry_id)
+    )
+    conn.commit()
+    conn.close()
+import sqlite3
+from datetime import datetime, timedelta
+from .constants import DB_PATH, MAX_DAYS_HISTORY
+
+
+def get_db_connection():
+    return sqlite3.connect(DB_PATH)
+
+
+def clean_old_data():
+    cutoff_date = (
+        datetime.now() - timedelta(days=MAX_DAYS_HISTORY)
+    ).strftime("%Y-%m-%d")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        "DELETE FROM entries WHERE entry_date < ?",
+        (cutoff_date,)
+    )
+    cur.execute(
+        "DELETE FROM predictions WHERE entry_date < ?",
+        (cutoff_date,)
+    )
+
+    deleted_entries = cur.rowcount
+    conn.commit()
+    conn.close()
+
+    print(
+        f"DEBUG: Cleaned old DB data before {cutoff_date}."
+    )
+def fetch_distinct_names_by_carrier():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    result = {}
+
+    for carrier in CARRIERS:
+        names = set()
+
+        cur.execute(
+            "SELECT DISTINCT name FROM entries WHERE carrier = ? AND name IS NOT NULL AND name != ''",
+            (carrier,)
+        )
+        for (name,) in cur.fetchall():
+            names.add(name)
+
+        cur.execute(
+            "SELECT DISTINCT name FROM predictions WHERE carrier = ? AND name IS NOT NULL AND name != ''",
+            (carrier,)
+        )
+        for (name,) in cur.fetchall():
+            names.add(name)
+
+        result[carrier] = sorted(names)
+
+    conn.close()
+    return result
+def fetch_predictions(entry_date):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, carrier, name, item_type, count, comments
+        FROM predictions
+        WHERE entry_date = ?
+        ORDER BY carrier, name, item_type
+    """, (entry_date,))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+def fetch_main_export(entry_date):
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query(
+        """
+        SELECT carrier, code, name, invoice, left, boxes, comments
+        FROM entries
+        WHERE entry_date = ?
+        ORDER BY carrier, name, code
+        """,
+        conn,
+        params=(entry_date,)
+    )
+    conn.close()
+    return df
+
+def fetch_entry_by_id(entry_id):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT code, name, invoice, left, boxes, comments FROM entries WHERE id = ?",
+        (entry_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+def fetch_prediction_export(entry_date):
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query(
+        """
+        SELECT carrier, name, item_type, count, comments
+        FROM predictions
+        WHERE entry_date = ?
+        ORDER BY carrier, name, item_type
+        """,
+        conn,
+        params=(entry_date,)
+    )
+    conn.close()
+    return df
+def fetch_prediction_by_id(prediction_id):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT name, item_type, count, comments FROM predictions WHERE id = ?",
+        (prediction_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    return row
+def update_entry(entry_id, code, name, invoice, left, boxes, comments):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE entries
+        SET code = ?, name = ?, invoice = ?, left = ?, boxes = ?, comments = ?
+        WHERE id = ?
+        """,
+        (code, name, invoice, left, boxes, comments, entry_id)
+    )
+    conn.commit()
+    conn.close()
+def insert_prediction(entry_date, carrier, name, item_type, count, comments):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO predictions (entry_date, carrier, name, item_type, count, comments)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (entry_date, carrier, name, item_type, count, comments)
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_prediction(prediction_id, name, item_type, count, comments):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE predictions
+        SET name = ?, item_type = ?, count = ?, comments = ?
+        WHERE id = ?
+        """,
+        (name, item_type, count, comments, prediction_id)
+    )
+    conn.commit()
+    conn.close()
+def delete_entries(entry_ids):
+    if not entry_ids:
+        return 0
+
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    cur.executemany(
+        "DELETE FROM entries WHERE id = ?",
+        [(eid,) for eid in entry_ids]
+    )
+
+    deleted = cur.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+def delete_predictions(prediction_ids):
+    if not prediction_ids:
+        return 0
+
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    cur.executemany(
+        "DELETE FROM predictions WHERE id = ?",
+        [(pid,) for pid in prediction_ids]
+    )
+
+    deleted = cur.rowcount
+    conn.commit()
+    conn.close()
+    return deleted

@@ -1,13 +1,13 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-import csv # Δεν χρησιμοποιείται άμεσα, ίσως για μελλοντική χρήση;
 import os
 from datetime import datetime, timedelta
 import webbrowser
 import tempfile
 import pandas as pd
-# import operator # Δεν χρησιμοποιείται, μπορεί να αφαιρεθεί
-import sqlite3
+from .db import fetch_entry_by_id
+from .db import fetch_prediction_by_id
+
 from .constants import (
     CARRIERS,
     SAVE_FOLDER,
@@ -21,47 +21,61 @@ from .constants import (
     ITEM_PALLET,
     ITEM_BOX
 )
+
 from .db import init_database
+from .db import (
+    insert_entry,
+    fetch_entries,
+    delete_entry,
+    update_entry_left
+)
+from .db import clean_old_data
+from .db import fetch_predictions
+from .db import fetch_distinct_names_by_carrier
+from .db import fetch_main_export, fetch_prediction_export
+from .export import export_dataframe_to_excel
+from .db import update_entry
+from .db import insert_prediction, update_prediction
+from .db import delete_entries
+from .db import delete_predictions
 
 
 class PaletesApp:
     def copy_main_selected(self, carrier):
-        if self.current_mode != "main": return
+
+        if self.current_mode != "main":
+            return
+
         selected_item_id = self.tables[carrier].selection()
         if not selected_item_id:
             messagebox.showwarning("Προσοχή", "Επιλέξτε μια εγγραφή για αντιγραφή.")
             return
+
         values = self.tables[carrier].item(selected_item_id[0], "values")
         if not values or len(values) < 6:
             messagebox.showerror("Σφάλμα", "Δεν ήταν δυνατή η ανάγνωση των δεδομένων για αντιγραφή.")
             return
+
         code_val = values[0].replace("✓ ", "").strip()
         name_val = values[1]
         invoice_val = ""
         left_val = values[3]
         boxes_val = values[4]
         comments_val = values[5]
-        conn = self.get_db_connection()
-        if conn:
-            try:
-                cursor = conn.cursor()
-                sql_insert = """
-                    INSERT INTO entries (entry_date, carrier, code, name, invoice, left, boxes, comments)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """
-                cursor.execute(sql_insert, (
-                    self.current_date.strftime('%Y-%m-%d'), carrier, code_val, name_val,
-                    invoice_val, left_val, boxes_val, comments_val
-                ))
-                conn.commit()
-                # messagebox.showinfo("Επιτυχία", f"Η εγγραφή αντιγράφηκε για την {self.current_date.strftime('%Y-%m-%d')}.")
-            except sqlite3.IntegrityError as e:
-                messagebox.showerror("Σφάλμα Βάσης", f"Πρόβλημα αντιγραφής (πιθανόν διπλότυπος κωδικός): {e}")
-            except Exception as e:
-                messagebox.showerror("Σφάλμα", f"Πρόβλημα κατά την αντιγραφή: {e}")
-            finally:
-                conn.close()
+
+        insert_entry(
+            self.current_date.strftime('%Y-%m-%d'),
+            carrier,
+            code_val,
+            name_val,
+            invoice_val,
+            left_val,
+            boxes_val,
+            comments_val
+        )
+
         self.load_main_data(self.current_date)
+
 
     def __init__(self, root):
         self.root = root
@@ -114,43 +128,15 @@ class PaletesApp:
         self.carriers_frame = None; self.canvas_window_id = None
 
         init_database()
-        self.clean_old_data_from_db()
+        clean_old_data()
         self.create_widgets()
         self.set_mode("main")
         self.update_name_combobox_values()
         self.root.after(60000, self.auto_refresh)
 
-    def get_db_connection(self):
-        conn = None
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            return conn
-        except sqlite3.Error as e:
-            messagebox.showerror("Σφάλμα Βάσης", f"Σύνδεση απέτυχε: {e}")
-            return None
 
-    def init_database(self):
-        conn = self.get_db_connection()
-        if conn:
-            try:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS entries (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, entry_date TEXT NOT NULL, carrier TEXT NOT NULL,
-                        code TEXT, name TEXT, invoice TEXT, left TEXT, boxes TEXT, comments TEXT
-                    )""")
-                try: cursor.execute("ALTER TABLE entries ADD COLUMN comments TEXT;")
-                except sqlite3.OperationalError: pass
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS predictions (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT, entry_date TEXT NOT NULL, carrier TEXT NOT NULL,
-                        name TEXT, item_type TEXT, count INTEGER, comments TEXT
-                    )""")
-                try: cursor.execute("ALTER TABLE predictions ADD COLUMN comments TEXT;")
-                except sqlite3.OperationalError: pass
-                conn.commit()
-            except sqlite3.Error as e: messagebox.showerror("Σφάλμα Βάσης", f"Αρχικοποίηση πινάκων: {e}")
-            finally: conn.close()
+
+
 
     def filter_names(self, event, carrier, cb):
         # Αν πατηθεί Tab, Shift, Ctrl, Alt, Enter, αγνοούμε το event για το φιλτράρισμα
@@ -335,7 +321,7 @@ class PaletesApp:
         lbl_total_box = tk.Label(summary_frame); lbl_total_box.pack(side=tk.LEFT, padx=1); self.prediction_widgets[carrier]['summary_labels']['total_box'] = lbl_total_box
 
     def toggle_mode(self):
-        # ... (без изменений)
+        
         if self.edit_mode:
             for carrier_in_edit in CARRIERS:
                 if self.item_being_edited.get(carrier_in_edit) is not None:
@@ -384,7 +370,7 @@ class PaletesApp:
             comments_text_widget.bind("<KeyPress-Return>", submit_on_enter_text) # KeyPress για να προλάβει τη νέα γραμμή
 
     def set_mode(self, mode):
-        # ... (без изменений)
+        
         if mode not in ["main", "prediction"]: return
         if self.edit_mode:
             for carrier_in_edit in CARRIERS:
@@ -428,7 +414,7 @@ class PaletesApp:
                 self.tables[carrier_key].event_generate("<<TreeviewSelect>>")
 
     def on_item_select(self, event):
-        # ... (без изменений)
+        
         widget = event.widget; carrier = None
         for c_key, main_w_dict in self.main_widgets.items():
             if 'table' in main_w_dict and widget == main_w_dict['table']: carrier = c_key; break
@@ -449,39 +435,65 @@ class PaletesApp:
             if self.prediction_edit_btns.get(carrier): self.prediction_edit_btns[carrier].config(state=tk.NORMAL if has_selection and not is_this_carrier_editing else tk.DISABLED)
 
     def enter_main_edit_mode(self, carrier):
-        # ... (без изменений)
-        if self.current_mode != "main": return
-        if self.edit_mode and self.item_being_edited.get(carrier) is None : # Αν είμαστε σε edit mode ΑΛΛΟΥ
-             messagebox.showinfo("Προσοχή", "Ολοκληρώστε την επεξεργασία στον άλλο μεταφορέα πρώτα.")
-             return
+
+        if self.current_mode != "main":
+            return
+
+        if self.edit_mode and self.item_being_edited.get(carrier) is None:
+            messagebox.showinfo("Προσοχή", "Ολοκληρώστε την επεξεργασία στον άλλο μεταφορέα πρώτα.")
+            return
+
         selected_item_id_tuple = self.tables[carrier].selection()
-        if not selected_item_id_tuple: messagebox.showwarning("Προσοχή", "Επιλέξτε εγγραφή."); return
+        if not selected_item_id_tuple:
+            messagebox.showwarning("Προσοχή", "Επιλέξτε εγγραφή.")
+            return
+
         item_db_id = selected_item_id_tuple[0]
-        conn = self.get_db_connection(); entry_to_edit = None
-        if conn:
-            try: cursor = conn.cursor(); cursor.execute("SELECT code, name, invoice, left, boxes, comments FROM entries WHERE id = ?", (item_db_id,)); entry_to_edit = cursor.fetchone()
-            finally: conn.close()
-        if not entry_to_edit: messagebox.showerror("Σφάλμα", "Δεν βρέθηκε η εγγραφή (main)."); return
+
+        entry_to_edit = fetch_entry_by_id(item_db_id)
+        if not entry_to_edit:
+            messagebox.showerror("Σφάλμα", "Δεν βρέθηκε η εγγραφή (main).")
+            return
+
         code_val, name_val, invoice_val, left_val, boxes_val, comments_val = entry_to_edit
-        try: code_e, name_cb_e, inv_e, left_cb_e, box_e, comm_txt_e = self.main_widgets[carrier]['entries'] # left_cb_e αντί left_v_e
-        except KeyError: messagebox.showerror("Σφάλμα Widgets", "Πρόβλημα πεδίων (main-edit)."); return
-        code_e.delete(0, tk.END); code_e.insert(0, code_val or "")
+
+        try:
+            code_e, name_cb_e, inv_e, left_cb_e, box_e, comm_txt_e = self.main_widgets[carrier]['entries']
+        except KeyError:
+            messagebox.showerror("Σφάλμα Widgets", "Πρόβλημα πεδίων (main-edit).")
+            return
+
+        code_e.delete(0, tk.END)
+        code_e.insert(0, code_val or "")
+
         self.name_vars[carrier].set(name_val or "")
-        inv_e.delete(0, tk.END); inv_e.insert(0, invoice_val or "")
-        left_cb_e.set(left_val or "ΟΧΙ") # Χρήση του Combobox widget για το set
-        box_e.delete(0, tk.END); box_e.insert(0, boxes_val or "")
-        comm_txt_e.delete("1.0", tk.END);
-        if comments_val: comm_txt_e.insert("1.0", comments_val)
+
+        inv_e.delete(0, tk.END)
+        inv_e.insert(0, invoice_val or "")
+
+        left_cb_e.set(left_val or NO)
+
+        box_e.delete(0, tk.END)
+        box_e.insert(0, boxes_val or "")
+
+        comm_txt_e.delete("1.0", tk.END)
+        if comments_val:
+            comm_txt_e.insert("1.0", comments_val)
+
         self.root.after(10, lambda: code_e.focus_set())
+
         self.main_widgets[carrier]['add_update_btn'].config(text="Ενημέρωση")
         self.main_edit_btns[carrier].config(state=tk.DISABLED)
         self.main_cancel_btns[carrier].pack(side=tk.LEFT, padx=1)
         self.main_widgets[carrier]['delete_btn'].config(state=tk.DISABLED)
         self.main_widgets[carrier]['copy_btn'].config(state=tk.DISABLED)
-        self.edit_mode = True; self.item_being_edited[carrier] = item_db_id
+
+        self.edit_mode = True
+        self.item_being_edited[carrier] = item_db_id
+
 
     def exit_main_edit_mode(self, carrier, clear_selection=True):
-        # ... (без изменений)
+        
         if not self.item_being_edited.get(carrier) and self.current_mode == "main" : # Έλεγχος αν όντως ήμασταν σε edit για αυτόν τον carrier σε αυτό το mode
              # Αν δεν ήμασταν, δεν κάνουμε κάτι για να μην κρύψουμε κουμπιά άσκοπα
              # Αυτό μπορεί να συμβεί αν αλλάζουμε mode και καλείται προληπτικά
@@ -519,7 +531,7 @@ class PaletesApp:
 
 
     def enter_prediction_edit_mode(self, carrier):
-        # ... (без изменений)
+        
         if self.current_mode != "prediction": return
         if self.edit_mode and self.item_being_edited.get(carrier) is None:
              messagebox.showinfo("Προσοχή", "Ολοκληρώστε την επεξεργασία στον άλλο μεταφορέα πρώτα.")
@@ -527,10 +539,8 @@ class PaletesApp:
         selected_item_id_tuple = self.tables[carrier].selection()
         if not selected_item_id_tuple: messagebox.showwarning("Προσοχή", "Επιλέξτε πρόβλεψη."); return
         item_db_id = selected_item_id_tuple[0]
-        conn = self.get_db_connection(); prediction_to_edit = None
-        if conn:
-            try: cursor = conn.cursor(); cursor.execute("SELECT name, item_type, count, comments FROM predictions WHERE id = ?", (item_db_id,)); prediction_to_edit = cursor.fetchone()
-            finally: conn.close()
+        prediction_to_edit = fetch_prediction_by_id(item_db_id)
+
         if not prediction_to_edit: messagebox.showerror("Σφάλμα", "Δεν βρέθηκε η πρόβλεψη."); return
         name_val, type_val, count_val, comments_val = prediction_to_edit
         try:
@@ -550,7 +560,7 @@ class PaletesApp:
         self.edit_mode = True; self.item_being_edited[carrier] = item_db_id
 
     def exit_prediction_edit_mode(self, carrier, clear_selection=True):
-        # ... (без изменений)
+        
         if not self.item_being_edited.get(carrier) and self.current_mode == "prediction":
             if not self.edit_mode: return
 
@@ -581,136 +591,222 @@ class PaletesApp:
             self.on_item_select(type('event', (object,), {'widget': self.tables[carrier]})())
 
     def handle_main_add_update(self, carrier):
-        # ... (без изменений)
-        if self.current_mode != "main": return
-        try: code_w, name_cb_w, inv_w, left_cb_w, box_w, comm_txt_w = self.main_widgets[carrier]['entries'] # left_cb_w
-        except ValueError: messagebox.showerror("Σφάλμα Widgets", "Πρόβλημα πεδίων (main add/update)."); return
+
+        if self.current_mode != "main":
+            return
+
+        try:
+            code_w, name_cb_w, inv_w, left_cb_w, box_w, comm_txt_w = self.main_widgets[carrier]['entries']
+        except ValueError:
+            messagebox.showerror("Σφάλμα Widgets", "Πρόβλημα πεδίων (main add/update).")
+            return
+
         code_val = code_w.get().strip()
         name_val = self.name_vars[carrier].get().strip()
         inv_val = inv_w.get().strip()
-        left_val = left_cb_w.get().strip() # Παίρνουμε την τιμή από το Combobox
+        left_val = left_cb_w.get().strip()
         box_val = box_w.get().strip()
         comm_val = comm_txt_w.get("1.0", "end-1c").strip()
-        if not code_val: messagebox.showerror("Σφάλμα", "Κωδικός Παλέτας υποχρεωτικός."); return
-        if box_val and not box_val.isdigit(): messagebox.showerror("Σφάλμα", "Κιβώτια: αριθμός."); return
-        if carrier == "ΔΙΑΚΙΝΗΣΗ" and not name_val: name_val = "Αθήνα"
-        conn = self.get_db_connection()
-        if conn:
-            try:
-                cursor = conn.cursor(); db_id_to_edit = self.item_being_edited.get(carrier)
-                if self.edit_mode and db_id_to_edit is not None:
-                    cursor.execute("UPDATE entries SET code=?, name=?, invoice=?, left=?, boxes=?, comments=? WHERE id=?", (code_val, name_val, inv_val, left_val, box_val, comm_val, db_id_to_edit))
-                    conn.commit(); self.exit_main_edit_mode(carrier, clear_selection=False)
-                else:
-                    cursor.execute("INSERT INTO entries (entry_date, carrier, code, name, invoice, left, boxes, comments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (self.current_date.strftime('%Y-%m-%d'), carrier, code_val, name_val, inv_val, left_val, box_val, comm_val))
-                    conn.commit()
-                    code_w.delete(0, tk.END); self.name_vars[carrier].set(""); inv_w.delete(0, tk.END)
-                    box_w.delete(0, tk.END); left_cb_w.set("ΟΧΙ"); comm_txt_w.delete("1.0", tk.END) # left_cb_w
-                    self.root.after(50, lambda: code_w.focus_set())
-                self.update_name_combobox_values()
-            except sqlite3.Error as e: messagebox.showerror("Σφάλμα Βάσης", f"Σφάλμα εγγραφής (main): {e}"); conn.rollback()
-            finally: conn.close()
+
+        if not code_val:
+            messagebox.showerror("Σφάλμα", "Κωδικός Παλέτας υποχρεωτικός.")
+            return
+
+        if box_val and not box_val.isdigit():
+            messagebox.showerror("Σφάλμα", "Κιβώτια: αριθμός.")
+            return
+
+        if carrier == "ΔΙΑΚΙΝΗΣΗ" and not name_val:
+            name_val = "Αθήνα"
+
+        db_id_to_edit = self.item_being_edited.get(carrier)
+
+        if self.edit_mode and db_id_to_edit is not None:
+            update_entry(
+                db_id_to_edit,
+                code_val,
+                name_val,
+                inv_val,
+                left_val,
+                box_val,
+                comm_val
+            )
+            self.exit_main_edit_mode(carrier, clear_selection=False)
+
+        else:
+            insert_entry(
+                self.current_date.strftime('%Y-%m-%d'),
+                carrier,
+                code_val,
+                name_val,
+                inv_val,
+                left_val,
+                box_val,
+                comm_val
+            )
+
+            code_w.delete(0, tk.END)
+            self.name_vars[carrier].set("")
+            inv_w.delete(0, tk.END)
+            box_w.delete(0, tk.END)
+            left_cb_w.set(NO)
+            comm_txt_w.delete("1.0", tk.END)
+            self.root.after(50, lambda: code_w.focus_set())
+
+        self.update_name_combobox_values()
         self.load_main_data(self.current_date)
 
+
     def handle_prediction_add_update(self, carrier):
-        # ... (без изменений)
-        if self.current_mode != "prediction": return
+
+        if self.current_mode != "prediction":
+            return
+
         try:
             name_cb_p, count_e_p, item_type_cb_p = self.prediction_widgets[carrier]['entries']
             comm_txt_p_widget = self.prediction_widgets[carrier]['comments_text']
-        except KeyError: messagebox.showerror("Σφάλμα Widgets", "Πρόβλημα πεδίων (prediction add/update)."); return
+        except KeyError:
+            messagebox.showerror("Σφάλμα Widgets", "Πρόβλημα πεδίων (prediction add/update).")
+            return
+
         comm_val_p = comm_txt_p_widget.get("1.0", "end-1c").strip() if comm_txt_p_widget else ""
         name_val_p = self.name_vars[carrier].get().strip()
         count_val_p = self.prediction_count_vars[carrier].get().strip()
         item_type_val_p = self.prediction_type_vars[carrier].get().strip()
-        if not name_val_p or not count_val_p or not item_type_val_p: messagebox.showerror("Σφάλμα", "Όνομα, Ποσότητα, Είδος υποχρεωτικά (pred)."); return
-        if not count_val_p.isdigit(): messagebox.showerror("Σφάλμα", "Ποσότητα (pred): αριθμός."); return
-        conn = self.get_db_connection()
-        if conn:
-            try:
-                cursor = conn.cursor(); db_id_to_edit = self.item_being_edited.get(carrier)
-                if self.edit_mode and db_id_to_edit is not None:
-                    cursor.execute("UPDATE predictions SET name=?, item_type=?, count=?, comments=? WHERE id=?", (name_val_p, item_type_val_p, int(count_val_p), comm_val_p, db_id_to_edit))
-                    conn.commit(); self.exit_prediction_edit_mode(carrier, clear_selection=False)
-                else:
-                    cursor.execute("INSERT INTO predictions (entry_date, carrier, name, item_type, count, comments) VALUES (?, ?, ?, ?, ?, ?)", (self.current_date.strftime('%Y-%m-%d'), carrier, name_val_p, item_type_val_p, int(count_val_p), comm_val_p))
-                    conn.commit()
-                    self.name_vars[carrier].set(""); self.prediction_count_vars[carrier].set("")
-                    self.prediction_type_vars[carrier].set("Παλέτα")
-                    if comm_txt_p_widget: comm_txt_p_widget.delete("1.0", tk.END)
-                    self.root.after(50, lambda: name_cb_p.focus_set())
-                self.update_name_combobox_values()
-            except sqlite3.Error as e: messagebox.showerror("Σφάλμα Βάσης", f"Σφάλμα εγγραφής (prediction): {e}"); conn.rollback()
-            finally: conn.close()
+
+        if not name_val_p or not count_val_p or not item_type_val_p:
+            messagebox.showerror("Σφάλμα", "Όνομα, Ποσότητα, Είδος υποχρεωτικά (pred).")
+            return
+
+        if not count_val_p.isdigit():
+            messagebox.showerror("Σφάλμα", "Ποσότητα (pred): αριθμός.")
+            return
+
+        db_id_to_edit = self.item_being_edited.get(carrier)
+
+        if self.edit_mode and db_id_to_edit is not None:
+            update_prediction(
+                db_id_to_edit,
+                name_val_p,
+                item_type_val_p,
+                int(count_val_p),
+                comm_val_p
+            )
+            self.exit_prediction_edit_mode(carrier, clear_selection=False)
+
+        else:
+            insert_prediction(
+                self.current_date.strftime('%Y-%m-%d'),
+                carrier,
+                name_val_p,
+                item_type_val_p,
+                int(count_val_p),
+                comm_val_p
+            )
+
+            self.name_vars[carrier].set("")
+            self.prediction_count_vars[carrier].set("")
+            self.prediction_type_vars[carrier].set("Παλέτα")
+            if comm_txt_p_widget:
+                comm_txt_p_widget.delete("1.0", tk.END)
+            self.root.after(50, lambda: name_cb_p.focus_set())
+
+        self.update_name_combobox_values()
         self.load_prediction_data(self.current_date)
 
+
     def delete_main_selected(self, carrier):
-        # ... (без изменений)
-        if self.current_mode != "main": return
+
+        if self.current_mode != "main":
+            return
+
         selected_ids = self.tables[carrier].selection()
-        if not selected_ids: messagebox.showwarning("Προσοχή", "Επιλέξτε εγγραφή(ές) (main)."); return
-        if not messagebox.askyesno("Επιβεβαίωση", f"Διαγραφή {len(selected_ids)} εγγραφών;"): return
-        conn = self.get_db_connection()
-        if conn:
-            try:
-                cursor = conn.cursor(); deleted_count = 0
-                for item_db_id in selected_ids: cursor.execute("DELETE FROM entries WHERE id = ?", (item_db_id,)); deleted_count += cursor.rowcount
-                conn.commit()
-                if deleted_count > 0: messagebox.showinfo("Επιτυχία", f"Διαγράφηκαν {deleted_count} εγγραφές.")
-            except sqlite3.Error as e: messagebox.showerror("Σφάλμα Βάσης", f"Σφάλμα διαγραφής (main): {e}"); conn.rollback()
-            finally: conn.close()
+        if not selected_ids:
+            messagebox.showwarning("Προσοχή", "Επιλέξτε εγγραφή(ές) (main).")
+            return
+
+        if not messagebox.askyesno(
+            "Επιβεβαίωση",
+            f"Διαγραφή {len(selected_ids)} εγγραφών;"
+        ):
+            return
+
+        deleted_count = delete_entries(selected_ids)
+
+        if deleted_count > 0:
+            messagebox.showinfo("Επιτυχία", f"Διαγράφηκαν {deleted_count} εγγραφές.")
+
         self.load_main_data(self.current_date)
-        self.item_being_edited[carrier] = None 
-        if not any(self.item_being_edited.values()): self.edit_mode = False
+        self.item_being_edited[carrier] = None
+        if not any(self.item_being_edited.values()):
+            self.edit_mode = False
+
 
 
     def delete_prediction_selected(self, carrier):
-        # ... (без изменений)
-        if self.current_mode != "prediction": return
+
+        if self.current_mode != "prediction":
+            return
+
         selected_ids = self.tables[carrier].selection()
-        if not selected_ids: messagebox.showwarning("Προσοχή", "Επιλέξτε πρόβλεψη(εις)."); return
-        if not messagebox.askyesno("Επιβεβαίωση", f"Διαγραφή {len(selected_ids)} προβλέψεων;"): return
-        conn = self.get_db_connection()
-        if conn:
-            try:
-                cursor = conn.cursor(); deleted_count = 0
-                for item_db_id in selected_ids: cursor.execute("DELETE FROM predictions WHERE id = ?", (item_db_id,)); deleted_count += cursor.rowcount
-                conn.commit()
-                if deleted_count > 0: messagebox.showinfo("Επιτυχία", f"Διαγράφηκαν {deleted_count} προβλέψεις.")
-            except sqlite3.Error as e: messagebox.showerror("Σφάλμα Βάσης", f"Σφάλμα διαγραφής (prediction): {e}"); conn.rollback()
-            finally: conn.close()
+        if not selected_ids:
+            messagebox.showwarning("Προσοχή", "Επιλέξτε πρόβλεψη(εις).")
+            return
+
+        if not messagebox.askyesno(
+            "Επιβεβαίωση",
+            f"Διαγραφή {len(selected_ids)} προβλέψεων;"
+        ):
+            return
+
+        deleted_count = delete_predictions(selected_ids)
+
+        if deleted_count > 0:
+            messagebox.showinfo("Επιτυχία", f"Διαγράφηκαν {deleted_count} προβλέψεις.")
+
         self.load_prediction_data(self.current_date)
         self.item_being_edited[carrier] = None
-        if not any(self.item_being_edited.values()): self.edit_mode = False
+        if not any(self.item_being_edited.values()):
+            self.edit_mode = False
+
 
 
     def toggle_left_status(self, event):
-        # ... (без изменений)
-        if self.current_mode != "main": return
-        widget = event.widget; carrier = None
+
+        if self.current_mode != "main":
+            return
+
+        widget = event.widget
+        carrier = None
+
         for c, main_w in self.main_widgets.items():
-            if 'table' in main_w and widget == main_w['table']: carrier = c; break
-        if not carrier: return
+            if 'table' in main_w and widget == main_w['table']:
+                carrier = c
+                break
+
+        if not carrier:
+            return
+
         item_iid = widget.identify_row(event.y)
-        if not item_iid: return
+        if not item_iid:
+            return
+
         item_db_id = item_iid
+
         current_values_in_tree = list(widget.item(item_iid, "values"))
-        if len(current_values_in_tree) < 4: return
+        if len(current_values_in_tree) < 4:
+            return
+
         current_left_in_tree = current_values_in_tree[3]
-        new_left_status = "ΝΑΙ" if current_left_in_tree == "ΟΧΙ" else "ΟΧΙ"
-        conn = self.get_db_connection()
-        if conn:
-            try:
-                cursor = conn.cursor()
-                cursor.execute("UPDATE entries SET left = ? WHERE id = ?", (new_left_status, item_db_id))
-                if cursor.rowcount == 0: messagebox.showwarning("Προσοχή", "Δεν ενημερώθηκε εγγραφή (toggle).")
-                conn.commit()
-            except sqlite3.Error as e: messagebox.showerror("Σφάλμα Βάσης", f"Σφάλμα ενημέρωσης 'Έφυγε': {e}"); conn.rollback()
-            finally: conn.close()
+        new_left_status = YES if current_left_in_tree == NO else NO
+
+        update_entry_left(item_db_id, new_left_status)
+
         self.load_main_data(self.current_date)
 
+
     def load_data_for_date(self, date):
-        # ... (без изменений)
+        
         self.current_date = date; self.date_label.config(text=str(self.current_date))
         if self.edit_mode:
             for c_edit in CARRIERS:
@@ -727,25 +823,30 @@ class PaletesApp:
 
 
     def update_name_combobox_values(self):
-        # ... (без изменений)
-        conn = self.get_db_connection()
-        if conn:
-            try:
-                cursor = conn.cursor()
-                for carrier in CARRIERS:
-                    names = set()
-                    cursor.execute("SELECT DISTINCT name FROM entries WHERE carrier = ? AND name IS NOT NULL AND name != ''", (carrier,))
-                    for row in cursor.fetchall(): names.add(row[0])
-                    cursor.execute("SELECT DISTINCT name FROM predictions WHERE carrier = ? AND name IS NOT NULL AND name != ''", (carrier,))
-                    for row in cursor.fetchall(): names.add(row[0])
-                    sorted_names = sorted(list(names))
-                    self.name_combobox_values[carrier] = sorted_names
-                    if carrier in self.main_widgets and 'entries' in self.main_widgets[carrier] and len(self.main_widgets[carrier]['entries']) > 1 and isinstance(self.main_widgets[carrier]['entries'][1], ttk.Combobox) and self.main_widgets[carrier]['entries'][1].winfo_exists():
-                        self.main_widgets[carrier]['entries'][1].config(values=sorted_names)
-                    if carrier in self.prediction_widgets and 'entries' in self.prediction_widgets[carrier] and len(self.prediction_widgets[carrier]['entries']) > 0 and isinstance(self.prediction_widgets[carrier]['entries'][0], ttk.Combobox) and self.prediction_widgets[carrier]['entries'][0].winfo_exists():
-                        self.prediction_widgets[carrier]['entries'][0].config(values=sorted_names)
-            except sqlite3.Error as e: messagebox.showerror("Σφάλμα Βάσης", f"Σφάλμα φόρτωσης ονομάτων: {e}")
-            finally: conn.close()
+
+        names_by_carrier = fetch_distinct_names_by_carrier()
+
+        for carrier, sorted_names in names_by_carrier.items():
+            self.name_combobox_values[carrier] = sorted_names
+
+            if (
+                carrier in self.main_widgets
+                and 'entries' in self.main_widgets[carrier]
+                and len(self.main_widgets[carrier]['entries']) > 1
+                and isinstance(self.main_widgets[carrier]['entries'][1], ttk.Combobox)
+                and self.main_widgets[carrier]['entries'][1].winfo_exists()
+            ):
+                self.main_widgets[carrier]['entries'][1].config(values=sorted_names)
+
+            if (
+                carrier in self.prediction_widgets
+                and 'entries' in self.prediction_widgets[carrier]
+                and len(self.prediction_widgets[carrier]['entries']) > 0
+                and isinstance(self.prediction_widgets[carrier]['entries'][0], ttk.Combobox)
+                and self.prediction_widgets[carrier]['entries'][0].winfo_exists()
+            ):
+                self.prediction_widgets[carrier]['entries'][0].config(values=sorted_names)
+
 
 
     def update_main_view(self):
@@ -824,7 +925,7 @@ class PaletesApp:
             s_inv['sum_inv'].config(text=f"Σύνολο Τιμολογίων: {inv_s}")
 
     def update_prediction_view(self):
-        # ... (без изменений)
+        
         for carrier in CARRIERS:
             if not (carrier in self.prediction_widgets and 'table' in self.prediction_widgets[carrier] and self.prediction_widgets[carrier]['table'].winfo_exists()): continue
             table = self.prediction_widgets[carrier]['table']
@@ -852,7 +953,7 @@ class PaletesApp:
 
 
     def sort_data(self, carrier, col_idx_in_data_tuple, direction, col_type='text'):
-        # ... (без изменений)
+        
         reverse = (direction == 'desc')
         data_list_to_sort = self.data[carrier] if self.current_mode == "main" else self.prediction_data[carrier]
         if not data_list_to_sort or col_idx_in_data_tuple >= len(data_list_to_sort[0]): return
@@ -866,7 +967,7 @@ class PaletesApp:
 
 
     def sort_column_handler(self, carrier, treeview_col_name):
-        # ... (без изменений)
+        
         data_tuple_actual_col_idx = None
         if self.current_mode == "main": display_to_data_map_main = {"code": 2, "name": 3, "invoice": 4, "left": 5, "boxes": 6, "comments": 7}; data_tuple_actual_col_idx = display_to_data_map_main.get(treeview_col_name)
         elif self.current_mode == "prediction": display_to_data_map_pred = {"name": 2, "item_type": 3, "count": 4, "comments": 5}; data_tuple_actual_col_idx = display_to_data_map_pred.get(treeview_col_name)
@@ -882,20 +983,20 @@ class PaletesApp:
 
 
     def update_navigation_buttons_state(self):
-        # ... (без изменений)
+        
         today = datetime.today().date(); oldest_date = today - timedelta(days=MAX_DAYS_HISTORY)
         self.prev_btn.config(state=tk.NORMAL if self.current_date > oldest_date else tk.DISABLED)
         self.next_btn.config(state=tk.NORMAL if (self.current_date - today).days < MAX_FUTURE_DAYS else tk.DISABLED)
 
     def prev_day(self):
-        # ... (без изменений)
+        
         today = datetime.today().date(); oldest_allowed = today - timedelta(days=MAX_DAYS_HISTORY)
         new_date = self.current_date - timedelta(days=1)
         if new_date >= oldest_allowed: self.load_data_for_date(new_date)
         else: messagebox.showinfo("Πληροφορία", f"Όριο {MAX_DAYS_HISTORY} ημερών."); self.prev_btn.config(state=tk.DISABLED)
 
     def next_day(self):
-        # ... (без изменений)
+        
         today = datetime.today().date(); new_date = self.current_date + timedelta(days=1)
         if (new_date - today).days <= MAX_FUTURE_DAYS: self.load_data_for_date(new_date)
         else: messagebox.showinfo("Πληροφορία", f"Όριο {MAX_FUTURE_DAYS} ημερών."); self.next_btn.config(state=tk.DISABLED)
@@ -903,70 +1004,82 @@ class PaletesApp:
     def refresh_data(self): self.load_data_for_date(self.current_date)
     def auto_refresh(self): self.refresh_data(); self.root.after(60000, self.auto_refresh)
 
-    def clean_old_data_from_db(self):
-        # ... (без изменений)
-        limit_date_str = (datetime.today().date() - timedelta(days=MAX_DAYS_HISTORY)).strftime('%Y-%m-%d')
-        conn = self.get_db_connection()
-        if conn:
-            try:
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM entries WHERE entry_date < ?", (limit_date_str,)); e_del = cursor.rowcount
-                cursor.execute("DELETE FROM predictions WHERE entry_date < ?", (limit_date_str,)); p_del = cursor.rowcount
-                conn.commit(); print(f"DEBUG: Cleaned: {e_del} entries, {p_del} predictions < {limit_date_str}.")
-            except sqlite3.Error as e: messagebox.showerror("Σφάλμα Βάσης", f"Σφάλμα καθαρισμού: {e}"); conn.rollback()
-            finally: conn.close()
+
 
     def export_current_mode_to_excel(self):
-        # ... (без изменений)
-        conn = self.get_db_connection()
-        if not conn: messagebox.showerror("Σφάλμα Βάσης", "Αδύνατη σύνδεση για εξαγωγή."); return
+
+        date_str = self.current_date.strftime('%Y-%m-%d')
+
         try:
-            date_str = self.current_date.strftime('%Y-%m-%d'); df = pd.DataFrame(); filename_suffix = f"{date_str}_{datetime.now().strftime('%H%M%S')}.xlsx"
             if self.current_mode == "main":
-                df = pd.read_sql_query("SELECT carrier, code, name, invoice, left, boxes, comments FROM entries WHERE entry_date = ? ORDER BY carrier, name, code", conn, params=(date_str,))
-                df.rename(columns={'carrier':'Μεταφορέας','code':'Κωδ.Παλέτας','name':'Όνομα','invoice':'Τιμολόγια','left':'Έφυγε','boxes':'Κιβώτια','comments':'Σχόλια'}, inplace=True)
-                export_filename = f"Δεδομένα_Παλετών_Κύρια_{filename_suffix}"
+                df = fetch_main_export(date_str)
+                df.rename(
+                    columns={
+                        'carrier': 'Μεταφορέας',
+                        'code': 'Κωδ.Παλέτας',
+                        'name': 'Όνομα',
+                        'invoice': 'Τιμολόγια',
+                        'left': 'Έφυγε',
+                        'boxes': 'Κιβώτια',
+                        'comments': 'Σχόλια'
+                    },
+                    inplace=True
+                )
+                prefix = f"Δεδομένα_Παλετών_Κύρια_{date_str}"
+
             elif self.current_mode == "prediction":
-                df = pd.read_sql_query("SELECT carrier, name, item_type, count, comments FROM predictions WHERE entry_date = ? ORDER BY carrier, name, item_type", conn, params=(date_str,))
-                df.rename(columns={'carrier':'Μεταφορέας','name':'Όνομα','item_type':'Είδος','count':'Ποσότητα','comments':'Σχόλια'}, inplace=True)
-                export_filename = f"Δεδομένα_Παλετών_Πρόβλεψη_{filename_suffix}"
-            else: messagebox.showwarning("Προσοχή", "Εξαγωγή μη διαθέσιμη."); return
-            if df.empty: messagebox.showwarning("Προσοχή", f"Δεν υπάρχουν δεδομένα ({date_str})."); return
-            try:
-                desktop_path = os.path.join(os.path.join(os.environ['USERPROFILE']), 'Desktop') if 'USERPROFILE' in os.environ else None
-                save_path = os.path.join(desktop_path, export_filename) if desktop_path and os.path.isdir(desktop_path) else os.path.join(tempfile.gettempdir(), export_filename)
-                df.to_excel(save_path, index=False)
-                messagebox.showinfo("Επιτυχής Εξαγωγή", f"Αποθηκεύτηκε:\n{save_path}\n\nΆνοιγμα...")
-                webbrowser.open(f"file://{os.path.realpath(save_path)}")
-            except Exception as e_io: messagebox.showerror("Σφάλμα Εξαγωγής IO", f"Σφάλμα IO: {e_io}")
-        except sqlite3.Error as e_sql: messagebox.showerror("Σφάλμα Βάσης/Εξαγωγής", f"Σφάλμα SQL: {e_sql}")
-        except Exception as e_gen: messagebox.showerror("Σφάλμα Εξαγωγής", f"Γενικό σφάλμα: {e_gen}")
-        finally:
-            if conn: conn.close()
+                df = fetch_prediction_export(date_str)
+                df.rename(
+                    columns={
+                        'carrier': 'Μεταφορέας',
+                        'name': 'Όνομα',
+                        'item_type': 'Είδος',
+                        'count': 'Ποσότητα',
+                        'comments': 'Σχόλια'
+                    },
+                    inplace=True
+                )
+                prefix = f"Δεδομένα_Παλετών_Πρόβλεψη_{date_str}"
+
+            else:
+                messagebox.showwarning("Προσοχή", "Εξαγωγή μη διαθέσιμη.")
+                return
+
+            path, err = export_dataframe_to_excel(df, prefix)
+
+            if err == "EMPTY":
+                messagebox.showwarning("Προσοχή", f"Δεν υπάρχουν δεδομένα ({date_str}).")
+            elif path:
+                messagebox.showinfo("Επιτυχής Εξαγωγή", f"Αποθηκεύτηκε:\n{path}")
+
+        except Exception as e:
+            messagebox.showerror("Σφάλμα Εξαγωγής", str(e))
+
 
     def load_main_data(self, date):
-        # ... (без изменений)
-        self.data = {c: [] for c in CARRIERS}; conn = self.get_db_connection()
-        if conn:
-            try:
-                cursor = conn.cursor()
-                cursor.execute("SELECT id, carrier, code, name, invoice, left, boxes, comments FROM entries WHERE entry_date = ? ORDER BY carrier, name, code", (date.strftime('%Y-%m-%d'),))
-                for row in cursor.fetchall():
-                    if row[1] in self.data: self.data[row[1]].append(row)
-            except sqlite3.Error as e: messagebox.showerror("Σφάλμα Βάσης", f"Φόρτωση κύριων: {e}")
-            finally: conn.close()
+        self.data = {c: [] for c in CARRIERS}
+
+        rows = fetch_entries(date.strftime('%Y-%m-%d'))
+
+        for row in rows:
+            entry_id, carrier, code, name, invoice, left, boxes, comments = row
+            if carrier in self.data:
+                self.data[carrier].append(row)
+
         self.update_main_view()
 
+
     def load_prediction_data(self, date):
-        # ... (без изменений)
-        self.prediction_data = {c: [] for c in CARRIERS}; conn = self.get_db_connection()
-        if conn:
-            try:
-                cursor = conn.cursor()
-                cursor.execute("SELECT id, carrier, name, item_type, count, comments FROM predictions WHERE entry_date = ? ORDER BY carrier, name, item_type", (date.strftime('%Y-%m-%d'),))
-                for row in cursor.fetchall():
-                    if row[1] in self.prediction_data: self.prediction_data[row[1]].append(row)
-            except sqlite3.Error as e: messagebox.showerror("Σφάλμα Βάσης", f"Φόρτωση πρόβλεψης: {e}")
-            finally: conn.close()
+        self.prediction_data = {c: [] for c in CARRIERS}
+
+        rows = fetch_predictions(date.strftime('%Y-%m-%d'))
+
+        for row in rows:
+            pred_id, carrier, name, item_type, count, comments = row
+            if carrier in self.prediction_data:
+                self.prediction_data[carrier].append(row)
+
         self.update_prediction_view()
+
+
 
