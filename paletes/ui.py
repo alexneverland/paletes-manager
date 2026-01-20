@@ -925,7 +925,28 @@ class PaletesApp:
                 boxes_display = str(boxes_str).strip() if str(boxes_str).strip() else ('0' if boxes_num > 0 or str(boxes_str).strip() == '0' else '')
 
                 tree_v = (code_d, name or "", inv or "", left_stat or "ΟΧΙ", boxes_display, comm or "")
-                table.insert("", "end", iid=db_id, values=tree_v, tags=tuple(tags) if tags else ())
+                # name είναι ήδη διαθέσιμο στον κώδικά σου
+                name_key = (name or "").strip().lower()
+
+                insert_index = "end"
+
+                for iid in table.get_children():
+                    existing_values = table.item(iid, "values")
+                    if not existing_values:
+                        continue
+
+                    existing_name = (existing_values[1] or "").strip().lower()
+                    if existing_name == name_key:
+                        insert_index = table.index(iid) + 1
+
+                table.insert(
+                    "",
+                    insert_index,
+                    iid=db_id,
+                    values=tree_v,
+                    tags=tuple(tags) if tags else ()
+                )
+
 
             s_pal['total_pal'].config(text=f"Παλέτες (Σύνολο): {pt}")
             s_pal['departed_pal'].config(text=f"Παλέτες (Αναχώρησαν): {pd}")
