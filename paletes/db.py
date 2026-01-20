@@ -10,13 +10,25 @@ log = logging.getLogger("paletes.db")
 
 def get_connection():
     try:
-        return sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(
+            DB_PATH,
+            timeout=30,          # περιμένει αν γράφει άλλος
+            check_same_thread=False
+        )
+
+        # Multi-user safe settings
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+
+        return conn
+
     except sqlite3.Error as e:
         messagebox.showerror("Σφάλμα Βάσης", f"Σύνδεση απέτυχε: {e}")
         return None
 
+
 def init_database():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     try:
         cur = conn.cursor()
 
@@ -60,7 +72,7 @@ from .constants import DB_PATH
 # =========================
 
 def insert_entry(entry_date, carrier, code, name, invoice, left, boxes, comments):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO entries
@@ -72,7 +84,7 @@ def insert_entry(entry_date, carrier, code, name, invoice, left, boxes, comments
 
 
 def fetch_entries(entry_date):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
         SELECT id, carrier, code, name, invoice, left, boxes, comments
@@ -86,7 +98,7 @@ def fetch_entries(entry_date):
 
 
 def delete_entry(entry_id):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cur = conn.cursor()
     cur.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
     conn.commit()
@@ -94,7 +106,7 @@ def delete_entry(entry_id):
 
 
 def update_entry_left(entry_id, left_value):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cur = conn.cursor()
     cur.execute(
         "UPDATE entries SET left = ? WHERE id = ?",
@@ -108,7 +120,7 @@ from .constants import DB_PATH, MAX_DAYS_HISTORY
 
 
 def get_db_connection():
-    return sqlite3.connect(DB_PATH)
+    return get_connection()
 
 
 def clean_old_data():
@@ -135,7 +147,7 @@ def clean_old_data():
     log.info("Cleaned old DB data before %s", cutoff_date)
 
 def fetch_distinct_names_by_carrier():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cur = conn.cursor()
 
     result = {}
@@ -162,7 +174,7 @@ def fetch_distinct_names_by_carrier():
     conn.close()
     return result
 def fetch_predictions(entry_date):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
         SELECT id, carrier, name, item_type, count, comments
@@ -174,7 +186,7 @@ def fetch_predictions(entry_date):
     conn.close()
     return rows
 def fetch_main_export(entry_date):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     df = pd.read_sql_query(
         """
         SELECT carrier, code, name, invoice, left, boxes, comments
@@ -189,7 +201,7 @@ def fetch_main_export(entry_date):
     return df
 
 def fetch_entry_by_id(entry_id):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cur = conn.cursor()
     cur.execute(
         "SELECT code, name, invoice, left, boxes, comments FROM entries WHERE id = ?",
@@ -200,7 +212,7 @@ def fetch_entry_by_id(entry_id):
     return row
 
 def fetch_prediction_export(entry_date):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     df = pd.read_sql_query(
         """
         SELECT carrier, name, item_type, count, comments
@@ -214,7 +226,7 @@ def fetch_prediction_export(entry_date):
     conn.close()
     return df
 def fetch_prediction_by_id(prediction_id):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cur = conn.cursor()
     cur.execute(
         "SELECT name, item_type, count, comments FROM predictions WHERE id = ?",
@@ -224,7 +236,7 @@ def fetch_prediction_by_id(prediction_id):
     conn.close()
     return row
 def update_entry(entry_id, code, name, invoice, left, boxes, comments):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cur = conn.cursor()
     cur.execute(
         """
@@ -237,7 +249,7 @@ def update_entry(entry_id, code, name, invoice, left, boxes, comments):
     conn.commit()
     conn.close()
 def insert_prediction(entry_date, carrier, name, item_type, count, comments):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cur = conn.cursor()
     cur.execute(
         """
@@ -251,7 +263,7 @@ def insert_prediction(entry_date, carrier, name, item_type, count, comments):
 
 
 def update_prediction(prediction_id, name, item_type, count, comments):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cur = conn.cursor()
     cur.execute(
         """
@@ -267,7 +279,7 @@ def delete_entries(entry_ids):
     if not entry_ids:
         return 0
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cur = conn.cursor()
 
     cur.executemany(
@@ -283,7 +295,7 @@ def delete_predictions(prediction_ids):
     if not prediction_ids:
         return 0
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cur = conn.cursor()
 
     cur.executemany(
