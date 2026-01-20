@@ -3,7 +3,8 @@ from tkinter import ttk, messagebox
 import os
 from datetime import datetime, timedelta
 import webbrowser
-import tempfile
+from .db import auto_backup_db
+
 import pandas as pd
 from .db import fetch_entry_by_id
 from .db import fetch_prediction_by_id
@@ -128,6 +129,7 @@ class PaletesApp:
         self.carriers_frame = None; self.canvas_window_id = None
 
         init_database()
+        auto_backup_db()
         clean_old_data()
         self.create_widgets()
         self.set_mode("main")

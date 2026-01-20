@@ -293,3 +293,34 @@ def delete_predictions(prediction_ids):
     conn.commit()
     conn.close()
     return deleted
+import shutil
+from datetime import date
+
+BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
+MAX_BACKUPS = 14
+
+
+def auto_backup_db():
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+
+    today = date.today().isoformat()
+    backup_path = os.path.join(BACKUP_DIR, f"paletes_{today}.db")
+
+    # Αν υπάρχει ήδη backup για σήμερα, δεν ξανακάνουμε
+    if os.path.exists(backup_path):
+        return
+
+    shutil.copy2(DB_PATH, backup_path)
+
+    # Καθάρισμα παλιών backups
+    backups = sorted(
+        f for f in os.listdir(BACKUP_DIR)
+        if f.startswith("paletes_") and f.endswith(".db")
+    )
+
+    if len(backups) > MAX_BACKUPS:
+        for old in backups[:-MAX_BACKUPS]:
+            try:
+                os.remove(os.path.join(BACKUP_DIR, old))
+            except Exception:
+                pass
