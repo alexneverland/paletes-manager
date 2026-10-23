@@ -84,13 +84,56 @@ def test_two_local_clients_do_not_lose_concurrent_inserts(database):
 
 def test_failed_backup_is_not_published(database, monkeypatch):
     db.init_database()
+    attempts = []
 
     def fail_publish(*args):
+        attempts.append(args)
         raise OSError('simulated unavailable share')
 
-    monkeypatch.setattr(db.os, 'replace', fail_publish)
+    monkeypatch.setattr(db.os, 'rename', fail_publish)
     assert db.auto_backup_db() is False
+    assert len(attempts) == 1
     assert list(Path(db.BACKUP_DIR).iterdir()) == []
+
+
+def test_backup_does_not_replace_another_clients_completed_snapshot(database, monkeypatch):
+    db.init_database()
+    original_rename = db.os.rename
+
+    def competing_publish(source, target):
+        with closing(sqlite3.connect(target)) as other:
+            other.execute('CREATE TABLE winner (value TEXT)')
+            other.execute("INSERT INTO winner VALUES ('other client')")
+            other.commit()
+        return original_rename(source, target)
+
+    monkeypatch.setattr(db.os, 'rename', competing_publish)
+    assert db.auto_backup_db()
+    backup = next(Path(db.BACKUP_DIR).glob('*.db'))
+    with closing(sqlite3.connect(backup)) as conn:
+        assert conn.execute('SELECT value FROM winner').fetchall() == [('other client',)]
+    assert not list(Path(db.BACKUP_DIR).glob('*.tmp'))
+
+
+def test_existing_daily_backup_still_prunes_old_copies(database):
+    from datetime import timedelta
+
+    db.init_database()
+    assert db.auto_backup_db()
+    for offset in range(1, 18):
+        (Path(db.BACKUP_DIR) / f'paletes_{date.today() - timedelta(days=offset)}.db').touch()
+    assert db.auto_backup_db()
+    assert len(list(Path(db.BACKUP_DIR).glob('*.db'))) == 14
+
+
+def test_backup_directory_listing_failure_is_reported(database, monkeypatch):
+    db.init_database()
+
+    def fail_listing(*args):
+        raise OSError('share unavailable')
+
+    monkeypatch.setattr(db.os, 'listdir', fail_listing)
+    assert db.auto_backup_db() is False
 
 
 def test_excel_export_contains_stored_data(database, monkeypatch):
@@ -167,3 +210,25 @@ def test_column_sort_is_not_overridden_by_name_grouping(app):
     assert [str(table.item(iid, 'values')[2]) for iid in table.get_children()] == ['1', '2', '3']
     app.sort_column_handler(carrier, 'invoice')
     assert [str(table.item(iid, 'values')[2]) for iid in table.get_children()] == ['3', '2', '1']
+    app.refresh_data()
+    assert [str(table.item(iid, 'values')[2]) for iid in table.get_children()] == ['3', '2', '1']
+
+
+def test_prediction_sort_does_not_change_main_grouping(app):
+    carrier = CARRIERS[0]
+    for code, name in [('P1', 'Alice'), ('P2', 'Bob'), ('P3', 'Alice')]:
+        db.insert_entry(date.today().isoformat(), carrier, code, name, '', 'ΟΧΙ', '', '')
+    app.set_mode('prediction')
+    app.sort_column_handler(carrier, 'count')
+    app.set_mode('main')
+    table = app.tables[carrier]
+    assert [table.item(iid, 'values')[0] for iid in table.get_children()] == ['P1', 'P3', 'P2']
+
+
+def test_refresh_loads_another_clients_new_record_outside_edit_mode(app):
+    carrier = CARRIERS[0]
+    table = app.tables[carrier]
+    assert not table.get_children()
+    db.insert_entry(date.today().isoformat(), carrier, 'PC2', 'Bob', '', 'ΟΧΙ', '', '')
+    app.refresh_data()
+    assert [table.item(iid, 'values')[0] for iid in table.get_children()] == ['PC2']

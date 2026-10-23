@@ -368,7 +368,7 @@ def auto_backup_db():
     try:
         os.makedirs(BACKUP_DIR, exist_ok=True)
         if os.path.exists(backup_path):
-            return True
+            return prune_backups()
         if not os.path.isfile(DB_PATH):
             raise FileNotFoundError(DB_PATH)
 
@@ -385,8 +385,17 @@ def auto_backup_db():
         with closing(sqlite3.connect(DB_PATH, timeout=30)) as source:
             with closing(sqlite3.connect(temporary_path)) as destination:
                 source.backup(destination, pages=256, progress=check_timeout, sleep=0.1)
-        os.replace(temporary_path, backup_path)
-        temporary_path = None
+        try:
+            # Windows rename fails if another client has already published.
+            # POSIX rename replaces the target, so use an exclusive hard link.
+            if os.name == 'nt':
+                os.rename(temporary_path, backup_path)
+                temporary_path = None
+            else:
+                os.link(temporary_path, backup_path)
+        except FileExistsError:
+            # Keep the complete snapshot that won the publication race.
+            pass
     except (sqlite3.Error, OSError, TimeoutError) as e:
         log.error("Backup failed: %s", e)
         return False
@@ -397,15 +406,23 @@ def auto_backup_db():
             except OSError:
                 log.exception("Could not remove incomplete backup %s", temporary_path)
 
-    backups = sorted(
-        f for f in os.listdir(BACKUP_DIR)
-        if f.startswith("paletes_") and f.endswith(".db")
-    )
+    return prune_backups()
 
-    if len(backups) > MAX_BACKUPS:
-        for old in backups[:-MAX_BACKUPS]:
-            try:
-                os.remove(os.path.join(BACKUP_DIR, old))
-            except Exception:
-                pass
+
+def prune_backups():
+    try:
+        backups = sorted(
+            f for f in os.listdir(BACKUP_DIR)
+            if f.startswith("paletes_") and f.endswith(".db")
+        )
+        if len(backups) > MAX_BACKUPS:
+            for old in backups[:-MAX_BACKUPS]:
+                try:
+                    os.remove(os.path.join(BACKUP_DIR, old))
+                except FileNotFoundError:
+                    # Another client may have pruned the same file.
+                    pass
+    except OSError as e:
+        log.error("Backup retention failed: %s", e)
+        return False
     return True
