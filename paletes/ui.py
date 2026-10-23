@@ -109,8 +109,10 @@ class PaletesApp:
         self.edit_mode = False
         self.item_being_edited = {c: None for c in CARRIERS}
 
-        self.sort_column = {c: None for c in CARRIERS}
-        self.sort_direction = {c: 'asc' for c in CARRIERS}
+        self.sort_columns_by_mode = {mode: {c: None for c in CARRIERS} for mode in ('main', 'prediction')}
+        self.sort_directions_by_mode = {mode: {c: 'asc' for c in CARRIERS} for mode in ('main', 'prediction')}
+        self.sort_column = self.sort_columns_by_mode['main']
+        self.sort_direction = self.sort_directions_by_mode['main']
 
         self.main_column_map = {"code": 0, "name": 1, "invoice": 2, "left": 3, "boxes": 4, "comments": 5}
         self.prediction_column_map = {"name": 0, "item_type": 1, "count": 2, "comments": 3}
@@ -137,9 +139,15 @@ class PaletesApp:
 
         footer.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=2)
 
-        init_database()
-        auto_backup_db()
-        clean_old_data()
+        if not init_database():
+            raise RuntimeError("Δεν ήταν δυνατή η αρχικοποίηση της βάσης.")
+        if auto_backup_db():
+            clean_old_data()
+        else:
+            messagebox.showwarning(
+                "Αντίγραφο ασφαλείας",
+                "Το backup απέτυχε. Δεν έγινε καθαρισμός παλιών δεδομένων."
+            )
         self.create_widgets()
         self.set_mode("main")
         self.update_name_combobox_values()
@@ -393,6 +401,8 @@ class PaletesApp:
         elif self.current_mode == "prediction":
             for carrier in CARRIERS: self.prediction_frames[carrier].pack_forget()
         self.current_mode = mode
+        self.sort_column = self.sort_columns_by_mode[mode]
+        self.sort_direction = self.sort_directions_by_mode[mode]
         if self.current_mode == "main":
             self.mode_button.config(text="Πρόβλεψη Παλετών")
             self.export_btn.config(text="Εξαγωγή σε Excel (Κύρια Δεδομένα)")
@@ -930,7 +940,7 @@ class PaletesApp:
 
                 insert_index = "end"
 
-                for iid in table.get_children():
+                for iid in (() if self.sort_columns_by_mode['main'].get(carrier) else table.get_children()):
                     existing_values = table.item(iid, "values")
                     if not existing_values:
                         continue
@@ -984,10 +994,11 @@ class PaletesApp:
             s_labels['total_pal'].config(text=f"Σ. Παλ: {pt}"); s_labels['total_box'].config(text=f"Σ. Κιβ: {bt}")
 
 
-    def sort_data(self, carrier, col_idx_in_data_tuple, direction, col_type='text'):
+    def sort_data(self, carrier, col_idx_in_data_tuple, direction, col_type='text', mode=None):
         
         reverse = (direction == 'desc')
-        data_list_to_sort = self.data[carrier] if self.current_mode == "main" else self.prediction_data[carrier]
+        mode = mode or self.current_mode
+        data_list_to_sort = self.data[carrier] if mode == "main" else self.prediction_data[carrier]
         if not data_list_to_sort or col_idx_in_data_tuple >= len(data_list_to_sort[0]): return
         if col_type == 'text': data_list_to_sort.sort(key=lambda x: str(x[col_idx_in_data_tuple] or '').lower(), reverse=reverse)
         elif col_type == 'number':
@@ -1033,8 +1044,15 @@ class PaletesApp:
         if (new_date - today).days <= MAX_FUTURE_DAYS: self.load_data_for_date(new_date)
         else: messagebox.showinfo("Πληροφορία", f"Όριο {MAX_FUTURE_DAYS} ημερών."); self.next_btn.config(state=tk.DISABLED)
 
-    def refresh_data(self): self.load_data_for_date(self.current_date)
-    def auto_refresh(self): self.refresh_data(); self.root.after(60000, self.auto_refresh)
+    def refresh_data(self):
+        if not self.edit_mode:
+            self.load_data_for_date(self.current_date)
+
+    def auto_refresh(self):
+        try:
+            self.refresh_data()
+        finally:
+            self.root.after(60000, self.auto_refresh)
 
 
 
@@ -1098,6 +1116,7 @@ class PaletesApp:
             if carrier in self.data:
                 self.data[carrier].append(row)
 
+        self.reapply_sort('main')
         self.update_main_view()
 
 
@@ -1111,7 +1130,18 @@ class PaletesApp:
             if carrier in self.prediction_data:
                 self.prediction_data[carrier].append(row)
 
+        self.reapply_sort('prediction')
         self.update_prediction_view()
+
+    def reapply_sort(self, mode):
+        columns = ({"code": 2, "name": 3, "invoice": 4, "left": 5, "boxes": 6, "comments": 7}
+                   if mode == 'main' else {"name": 2, "item_type": 3, "count": 4, "comments": 5})
+        for carrier in CARRIERS:
+            column = self.sort_columns_by_mode[mode].get(carrier)
+            if column in columns:
+                numeric = column in ('invoice', 'boxes') if mode == 'main' else column == 'count'
+                self.sort_data(carrier, columns[column], self.sort_directions_by_mode[mode][carrier],
+                               'number' if numeric else 'text', mode=mode)
 
 
 

@@ -3,7 +3,11 @@ from paletes.ui import PaletesApp
 
 def main():
     root = tk.Tk()
-    PaletesApp(root)
+    try:
+        PaletesApp(root)
+    except RuntimeError:
+        root.destroy()
+        return
     root.mainloop()
 
 if __name__ == "__main__":

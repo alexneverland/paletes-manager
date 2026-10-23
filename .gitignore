@@ -5,3 +5,9 @@ data/
 *.xlsx
 *.log
 .DS_Store
+.venv/
+.pytest_cache/
+.pytest_tmp/
+build/
+dist/
+*.spec
