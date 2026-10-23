@@ -1,7 +1,9 @@
 import sqlite3
 import os
-import shutil
+import tempfile
 import logging
+import time
+from contextlib import closing
 from datetime import datetime, timedelta, date
 from tkinter import messagebox
 import pandas as pd
@@ -15,16 +17,21 @@ log = logging.getLogger("paletes.db")
 # ======================================================
 
 def get_connection():
+    conn = None
     try:
+        os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
         conn = sqlite3.connect(
             DB_PATH,
             timeout=30,
             check_same_thread=False
         )
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
+        # Separate office PCs cannot share WAL's shared-memory index.
+        conn.execute("PRAGMA journal_mode=DELETE;")
+        conn.execute("PRAGMA synchronous=FULL;")
         return conn
-    except sqlite3.Error as e:
+    except (sqlite3.Error, OSError) as e:
+        if conn is not None:
+            conn.close()
         messagebox.showerror("Σφάλμα Βάσης", f"Σύνδεση απέτυχε: {e}")
         return None
 
@@ -39,7 +46,7 @@ def get_db_connection():
 def init_database():
     conn = get_connection()
     if conn is None:
-        return
+        return False
 
     try:
         cur = conn.cursor()
@@ -71,9 +78,11 @@ def init_database():
         """)
 
         conn.commit()
+        return True
 
     except sqlite3.Error as e:
         messagebox.showerror("Σφάλμα Βάσης", f"Αρχικοποίηση DB: {e}")
+        return False
 
     finally:
         conn.close()
@@ -353,19 +362,40 @@ MAX_BACKUPS = 14
 
 
 def auto_backup_db():
-    os.makedirs(BACKUP_DIR, exist_ok=True)
-
     today = date.today().isoformat()
     backup_path = os.path.join(BACKUP_DIR, f"paletes_{today}.db")
-
-    if os.path.exists(backup_path):
-        return
-
+    temporary_path = None
     try:
-        shutil.copy2(DB_PATH, backup_path)
-    except Exception as e:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        if os.path.exists(backup_path):
+            return True
+        if not os.path.isfile(DB_PATH):
+            raise FileNotFoundError(DB_PATH)
+
+        # Each instance writes its own temporary file. Publish only a complete
+        # SQLite snapshot, including any committed pages still in an old WAL.
+        with tempfile.NamedTemporaryFile(dir=BACKUP_DIR, suffix=".tmp", delete=False) as temp:
+            temporary_path = temp.name
+        deadline = time.monotonic() + 30
+
+        def check_timeout(status, remaining, total):
+            if time.monotonic() > deadline:
+                raise TimeoutError("Η βάση παραμένει απασχολημένη για το backup.")
+
+        with closing(sqlite3.connect(DB_PATH, timeout=30)) as source:
+            with closing(sqlite3.connect(temporary_path)) as destination:
+                source.backup(destination, pages=256, progress=check_timeout, sleep=0.1)
+        os.replace(temporary_path, backup_path)
+        temporary_path = None
+    except (sqlite3.Error, OSError, TimeoutError) as e:
         log.error("Backup failed: %s", e)
-        return
+        return False
+    finally:
+        if temporary_path is not None:
+            try:
+                os.remove(temporary_path)
+            except OSError:
+                log.exception("Could not remove incomplete backup %s", temporary_path)
 
     backups = sorted(
         f for f in os.listdir(BACKUP_DIR)
@@ -378,3 +408,4 @@ def auto_backup_db():
                 os.remove(os.path.join(BACKUP_DIR, old))
             except Exception:
                 pass
+    return True

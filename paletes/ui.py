@@ -137,9 +137,15 @@ class PaletesApp:
 
         footer.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=2)
 
-        init_database()
-        auto_backup_db()
-        clean_old_data()
+        if not init_database():
+            raise RuntimeError("Δεν ήταν δυνατή η αρχικοποίηση της βάσης.")
+        if auto_backup_db():
+            clean_old_data()
+        else:
+            messagebox.showwarning(
+                "Αντίγραφο ασφαλείας",
+                "Το backup απέτυχε. Δεν έγινε καθαρισμός παλιών δεδομένων."
+            )
         self.create_widgets()
         self.set_mode("main")
         self.update_name_combobox_values()
@@ -930,7 +936,7 @@ class PaletesApp:
 
                 insert_index = "end"
 
-                for iid in table.get_children():
+                for iid in (() if self.sort_column.get(carrier) else table.get_children()):
                     existing_values = table.item(iid, "values")
                     if not existing_values:
                         continue
@@ -1033,8 +1039,15 @@ class PaletesApp:
         if (new_date - today).days <= MAX_FUTURE_DAYS: self.load_data_for_date(new_date)
         else: messagebox.showinfo("Πληροφορία", f"Όριο {MAX_FUTURE_DAYS} ημερών."); self.next_btn.config(state=tk.DISABLED)
 
-    def refresh_data(self): self.load_data_for_date(self.current_date)
-    def auto_refresh(self): self.refresh_data(); self.root.after(60000, self.auto_refresh)
+    def refresh_data(self):
+        if not self.edit_mode:
+            self.load_data_for_date(self.current_date)
+
+    def auto_refresh(self):
+        try:
+            self.refresh_data()
+        finally:
+            self.root.after(60000, self.auto_refresh)
 
 
 
