@@ -3,69 +3,92 @@
 [![Tests](https://github.com/alexneverland/paletes-manager/actions/workflows/tests.yml/badge.svg)](https://github.com/alexneverland/paletes-manager/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Desktop εφαρμογή για διαχείριση παλετών και κιβωτίων ανά μεταφορέα, με ημερήσιο ιστορικό, πρόβλεψη και εξαγωγή σε Excel. Σχεδιασμένη για πραγματική καθημερινή χρήση σε αποθήκες, μεταφορικές και logistics.
+A desktop application for tracking pallets and boxes by carrier, with daily history, shipment planning and Excel export. Built for everyday use in warehouses, transport offices and logistics.
 
-[Δείτε παρουσίαση και εικόνες της εφαρμογής](https://lazaros-solutions.vercel.app/#paletes-presentation).
+The application interface is currently in Greek.
 
-## Λειτουργίες
+[View the project presentation](https://lazaros-solutions.vercel.app/#paletes-presentation).
 
-- Καταχώρηση παλετών και κιβωτίων ανά μεταφορέα
-- Κατάσταση «Έφυγε / Όχι» με διπλό κλικ
-- Ημερήσιο ιστορικό με πλοήγηση ημερών
-- Πρόβλεψη παλετών και κιβωτίων
-- Αυτόματοι υπολογισμοί συνόλων παλετών, κιβωτίων και τιμολογίων
-- Οπτική επισήμανση εγγραφών με χρωματική ομαδοποίηση
-- Εξαγωγή δεδομένων σε Excel
-- Τοπική αποθήκευση σε SQLite
-- Offline-first λειτουργία χωρίς server
+## Features
 
-## Τεχνολογίες
+- Record pallets and boxes by carrier.
+- Toggle departure status with a double-click.
+- Browse daily records and shipment history.
+- Plan pallet and box requirements for upcoming days.
+- Automatically calculate pallet, box and invoice totals.
+- Identify related records through color grouping.
+- Export data to Excel.
+- Store data locally in SQLite.
+- Work offline without a server.
+
+## Screenshots
+
+These are real screenshots of the application and its exported Excel file, captured with a separate demo database. No office database or customer records were used.
+
+### Daily tracking and departures
+
+Pallets and boxes grouped by carrier, with a clear view of departed and pending shipments.
+
+![Daily entries for two carriers, showing pallet codes, box counts and departure status.](docs/images/daily-tracking.webp)
+
+### Planning upcoming days
+
+Prepare pallet and box quantities, destinations and route notes before the shipment date.
+
+![Next-day planning with pallet and box quantities, destinations and route comments.](docs/images/next-day-planning.webp)
+
+### Excel export
+
+Export the selected day's records for further processing and sharing.
+
+![Exported Excel spreadsheet with carrier, pallet code, name, invoices, departure status, boxes and comments.](docs/images/excel-export.webp)
+
+## Technology
 
 - Python
 - Tkinter
 - SQLite
 - Pandas
-- openpyxl (εξαγωγή Excel)
+- openpyxl for Excel export
 
-## Χρήση ως φορητό EXE (γραφείο)
+## Using the portable Windows EXE
 
-Το EXE εκτελείται απευθείας, χωρίς εγκατάσταση Python. Η βάση παραμένει στο
-`data/paletes.db` δίπλα στο EXE. Η διαδρομή αυτή δεν αλλάζει με την ενημέρωση.
-Σε νέα χρήση ο φάκελος δεδομένων δημιουργείται αυτόματα.
+The EXE runs directly without installing Python. The database stays at
+`data/paletes.db` beside the executable. Updating the EXE does not change this
+path. On first use, the data directory is created automatically.
 
-### Ενημέρωση με κοινή βάση σε δύο υπολογιστές
+### Updating an office setup with a shared database on two computers
 
-1. Κλείστε την εφαρμογή και στους δύο υπολογιστές.
-2. Κρατήστε αντίγραφο ολόκληρου του υπάρχοντος φακέλου `data`.
-3. Αντικαταστήστε μόνο το EXE στην υπάρχουσα θέση. Αν έχετε δύο αντίγραφα του
-   προγράμματος, ενημερώστε και τα δύο. Διατηρήστε την υπάρχουσα πρόσβαση στην
-   κοινή βάση· μην δημιουργήσετε δύο ανεξάρτητους φακέλους δεδομένων.
-4. Ανοίξτε πρώτα τη νέα έκδοση από έναν υπολογιστή. Η βάση μεταφέρεται από WAL
-   σε rollback journal (`DELETE`), χωρίς αλλαγή των πινάκων ή των εγγραφών.
-   Μετά την ολοκλήρωση της εκκίνησης ανοίξτε και τον δεύτερο υπολογιστή.
-5. Μην ξανατρέξετε την παλιά έκδοση μαζί με τη νέα: η παλιά ενεργοποιεί WAL.
+1. Close the application on both computers.
+2. Back up the entire existing `data` directory.
+3. Replace only the EXE in its existing location. If you have two copies of the
+   program, update both. Preserve the existing connection to the shared database;
+   do not create two independent data directories.
+4. Start the new version on one computer first. The database switches from WAL
+   to rollback journaling (`DELETE`), without changing tables or records. Once
+   startup is complete, open the application on the second computer.
+5. Do not run the old and new versions together: the old version enables WAL.
 
-Το WAL δεν υποστηρίζει πρόσβαση στην ίδια βάση από διαφορετικούς υπολογιστές
-μέσω δικτύου: <https://sqlite.org/wal.html>. Το rollback journal απαιτεί σωστό
-locking από τον κοινόχρηστο δικτυακό φάκελο. Η δοκιμή δύο τοπικών συνδέσεων
-δεν αντικαθιστά έλεγχο του πραγματικού δικτύου του γραφείου.
+WAL does not support access to the same database from different computers over
+a network; see the [SQLite WAL documentation](https://sqlite.org/wal.html).
+Rollback journaling requires reliable file locking on the shared network folder.
+Testing two local connections does not replace testing the actual office network.
 
-Δεν υπάρχει ανίχνευση σύγκρουσης όταν δύο χρήστες επεξεργάζονται την ίδια
-εγγραφή ή πρόβλεψη: υπερισχύει η τελευταία αποθήκευση. Αποφύγετε την ταυτόχρονη
-επεξεργασία της ίδιας εγγραφής από δύο υπολογιστές.
+There is no conflict detection when two users edit the same record or prediction:
+the last save wins. Avoid editing the same record simultaneously on two computers.
 
-Τα ημερήσια backup δημιουργούνται με το SQLite backup API και δημοσιεύονται
-μόνο αφού ολοκληρωθούν. Διατηρούνται έως 14 ημερήσια αντίγραφα. Παραμένει η
-υπάρχουσα πολιτική διαγραφής ιστορικού παλαιότερου των 40 ημερών· αν αποτύχει
-το backup κατά την εκκίνηση, ο καθαρισμός παραλείπεται και εμφανίζεται μήνυμα.
+Daily backups use the SQLite backup API and are published only after completion.
+Up to 14 daily backups are retained. The existing policy deletes history older
+than 40 days; if the startup backup fails, cleanup is skipped and a message is
+displayed.
 
-Κατά την επεξεργασία εγγραφής η ανανέωση αναβάλλεται, ώστε να διατηρούνται οι
-μη αποθηκευμένες αλλαγές. Μετά την αποθήκευση ή την ακύρωση συνεχίζεται κανονικά.
-Η ταξινόμηση στήλης υπερισχύει της προεπιλεγμένης ομαδοποίησης ανά όνομα.
+While a record is being edited, refresh is deferred to preserve unsaved changes.
+Normal refresh resumes after saving or cancelling. Explicit column sorting takes
+precedence over the default grouping by name.
 
-## Εκτέλεση από πηγαίο κώδικα
+## Running from source
 
-Απαιτείται Python 3.9 ή νεότερη έκδοση με Tkinter.
+Requires Python 3.9 or later with Tkinter.
 
 ```powershell
 python -m venv .venv
@@ -73,7 +96,7 @@ python -m venv .venv
 .venv/Scripts/python.exe main.py
 ```
 
-## Έλεγχοι και δημιουργία EXE σε Windows
+## Testing and building the Windows EXE
 
 ```powershell
 .venv/Scripts/python.exe -m pip install -r requirements-dev.txt
@@ -81,36 +104,37 @@ python -m venv .venv
 .venv/Scripts/python.exe -m PyInstaller --noconfirm --clean --onefile --windowed --name PaletesManager --hidden-import openpyxl main.py
 ```
 
-Το νέο EXE βρίσκεται στο `dist/PaletesManager.exe`. Δεν περιλαμβάνει τη βάση
-δεδομένων. Οι έλεγχοι χρησιμοποιούν προσωρινές βάσεις και πραγματικά Tkinter
-widgets σε κρυφό παράθυρο, χωρίς πρόσβαση στα δεδομένα του γραφείου.
+The new executable is created at `dist/PaletesManager.exe`. It does not include
+the database. Tests use temporary databases and real Tkinter widgets in a hidden
+window, without accessing office data.
 
-## Δεδομένα
+## Data
 
-Στο EXE η βάση βρίσκεται στο `data/paletes.db` δίπλα στο εκτελέσιμο. Κατά την
-εκτέλεση από πηγαίο κώδικα βρίσκεται στο `paletes/data/paletes.db`.
-Η βάση δεδομένων, τα backup και τα αρχεία Excel δεν περιλαμβάνονται στο repository.
+When running the EXE, the database is located at `data/paletes.db` beside the
+executable. When running from source, it is located at `paletes/data/paletes.db`.
+The database, backups and exported Excel files are not included in this repository.
 
-## Άδεια και υποστήριξη
+## License and support
 
-Ο πηγαίος κώδικας διατίθεται με την [άδεια MIT](LICENSE). Επιτρέπονται η χρήση,
-τροποποίηση και εμπορική αξιοποίηση με τους όρους της άδειας, διατηρώντας την
-αναφορά πνευματικών δικαιωμάτων και το κείμενο της άδειας στα αντίγραφα.
-Το λογισμικό παρέχεται ως έχει, χωρίς εγγύηση, όπως ορίζει η MIT.
+The source code is available under the [MIT License](LICENSE). Use, modification
+and commercial use are permitted under its terms, provided the copyright notice
+and license text are retained in copies. The software is provided as is, without
+warranty, as stated in the license.
 
-Για παραμετροποίηση στις διαδικασίες μιας επιχείρησης ή επαγγελματική υποστήριξη,
-μπορείτε να [επικοινωνήσετε με το Lazaros Solutions](https://lazaros-solutions.vercel.app/#contact).
-Η παραμετροποίηση και η υποστήριξη μπορούν να συμφωνηθούν ως ξεχωριστές υπηρεσίες.
+For customization to fit your business processes or professional support,
+[contact Lazaros Solutions](https://lazaros-solutions.vercel.app/#contact).
+Customization and support can be arranged as separate services.
 
-## Στόχος
+## Purpose
 
-Το project έχει σχεδιαστεί ως πρακτικό εργαλείο εργασίας και όχι ως demo ή tutorial. Μπορεί να χρησιμοποιηθεί αυτούσιο ή να αποτελέσει βάση για μελλοντική επέκταση, modular refactor ή εμπορική έκδοση.
+This project was built as a practical working tool for everyday operations.
+It can be used as is or serve as a foundation for future extensions, modular
+refactoring or a commercial edition.
 
-## Προσαρμογή και μελλοντική αναβάθμιση
+## Customization and future upgrades
 
-Η σημερινή έκδοση καλύπτει την τοπική λειτουργία του γραφείου με SQLite.
-Ανάλογα με τις ανάγκες, μπορεί να επεκταθεί με νέες λειτουργίες, περισσότερους
-χρήστες, δικαιώματα πρόσβασης ή κεντρική εξωτερική βάση PostgreSQL, για παράδειγμα
-μέσω Supabase. Μια τέτοια αναβάθμιση απαιτεί κατάλληλο σχεδιασμό πρόσβασης,
-μεταφορά δεδομένων και χειρισμό ταυτόχρονων αλλαγών· δεν αποτελεί ήδη διαθέσιμη
-λειτουργία της παρούσας έκδοσης.
+The current version supports local office operation with SQLite. Depending on
+requirements, it could be extended with additional features, more users, access
+controls or a centralized external PostgreSQL database, for example through
+Supabase. Such an upgrade requires appropriate access design, data migration and
+handling of concurrent changes; it is not an existing feature of this version.
